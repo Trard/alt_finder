@@ -4,12 +4,12 @@ Written with usage of o3 mini
 # Usage
 ## Find by IP
 ```bash
-./alt_finder.py 5.144.73.108 --dir /path/to/logs
+python3 alt_finder.py 5.144.73.108 --dir /path/to/logs
 ```
 
 ## Find by player name
 ```
-./alt_finder.py kouchklinktrane --dir /path/to/logs
+python3 alt_finder.py kouchklinktrane --dir /path/to/logs
 ```
 
 ## Output example:
