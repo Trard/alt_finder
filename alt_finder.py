@@ -84,11 +84,13 @@ def get_alt_chain_paths(start, player_to_ips, ip_to_players):
                     queue.append(neighbor)
     return parent, visited
 
-def reconstruct_chain_path(alt, parent):
+def reconstruct_chain_path(alt, parent, hide_ip=False):
     """
     Reconstructs the chain path from the starting player to 'alt' using the 'parent' map.
-    Returns a string showing the chain in the form:
+    If hide_ip is False, returns a string showing the chain in the form:
       start -> intermediate (via connecting_ip) -> alt (via connecting_ip)
+    If hide_ip is True, returns a string showing only the chain of players:
+      start -> intermediate -> alt
     """
     # If there is no parent, then alt is the starting node.
     if alt not in parent:
@@ -102,7 +104,10 @@ def reconstruct_chain_path(alt, parent):
     path.reverse()
     chain_str = path[0][0]  # starting player name
     for prev, ip, curr in path:
-        chain_str += f" -> {curr} (via {ip})"
+        if hide_ip:
+            chain_str += f" -> {curr}"
+        else:
+            chain_str += f" -> {curr} (via {ip})"
     return chain_str
 
 def main():
@@ -128,6 +133,10 @@ def main():
     parser.add_argument(
         "--since",
         help="Only process log files modified since this ISO date (e.g. 2025-02-14T00:00:00)"
+    )
+    parser.add_argument(
+        "--hide-ip", action="store_true",
+        help="Hide IP addresses in the alt chain output."
     )
     args = parser.parse_args()
 
@@ -184,7 +193,7 @@ def main():
                     for alt in sorted(chain_nodes):
                         if alt == query:
                             continue
-                        chain_str = reconstruct_chain_path(alt, parent)
+                        chain_str = reconstruct_chain_path(alt, parent, hide_ip=args.hide_ip)
                         print(f"  {chain_str}")
 
 if __name__ == '__main__':
