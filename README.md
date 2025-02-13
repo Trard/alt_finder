@@ -1,3 +1,5 @@
+# Alt finder for minecraft Java Edition
+
 # Usage
 ## Find by IP
 ```bash
