@@ -1,4 +1,5 @@
 # Alt finder for minecraft Java Edition
+Written with usage of o3 mini
 
 # Usage
 ## Find by IP
