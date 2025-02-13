@@ -66,23 +66,27 @@ def parse_logs(directory, file_pattern, since=None):
 def get_alt_chain_paths(start, player_to_ips, ip_to_players):
     """
     Perform a breadth-first search starting from 'start' to find all players
-    connected by shared IPs. Returns a tuple (parent, visited) where:
+    connected by shared IPs. Returns a tuple (parent, visited, discovered_order) where:
       - parent: a dict mapping each encountered player (except start) to a tuple (prev, ip)
                 indicating that 'prev' connects to that player via 'ip'.
       - visited: the set of all players in the connected component.
+      - discovered_order: a list of players (other than start) in the order they were discovered.
     """
     queue = deque([start])
     visited = {start}
     parent = {}  # key: player, value: (previous player, connecting IP)
+    discovered_order = []
     while queue:
         current = queue.popleft()
         for ip in player_to_ips.get(current, []):
+            # Iterate over the players sharing the IP.
             for neighbor in ip_to_players.get(ip, []):
                 if neighbor not in visited:
                     visited.add(neighbor)
                     parent[neighbor] = (current, ip)
                     queue.append(neighbor)
-    return parent, visited
+                    discovered_order.append(neighbor)
+    return parent, visited, discovered_order
 
 def reconstruct_chain_path(alt, parent, hide_ip=False):
     """
@@ -138,6 +142,10 @@ def main():
         "--hide-ip", action="store_true",
         help="Hide IP addresses in the alt chain output."
     )
+    parser.add_argument(
+        "--flat-chain", action="store_true",
+        help="Display a single flat chain of all connected accounts (separated by ' - ') instead of separate chain paths."
+    )
     args = parser.parse_args()
 
     # If --since is provided, parse the ISO date.
@@ -183,18 +191,28 @@ def main():
 
             # If the chain flag is enabled, build and display the alt chains.
             if args.chain:
-                parent, chain_nodes = get_alt_chain_paths(query, player_to_ips, ip_to_players)
+                parent, chain_nodes, discovered_order = get_alt_chain_paths(query, player_to_ips, ip_to_players)
                 if len(chain_nodes) == 1:
                     print("\nNo alternate account chain found.")
                 else:
-                    print("\nAlternate account chains:")
-                    # For each account in the connected component (except the query),
-                    # reconstruct and display the chain path.
-                    for alt in sorted(chain_nodes):
-                        if alt == query:
-                            continue
-                        chain_str = reconstruct_chain_path(alt, parent, hide_ip=args.hide_ip)
-                        print(f"  {chain_str}")
+                    if args.flat_chain:
+                        # Build a single flat chain: use the order in which nodes were discovered,
+                        # then append the queried account at the end.
+                        if discovered_order:
+                            flat_chain = " - ".join(discovered_order + [query])
+                            print("\nAlternate account flat chain:")
+                            print(f"  {flat_chain}")
+                        else:
+                            print("\nNo alternate account chain found.")
+                    else:
+                        print("\nAlternate account chains:")
+                        # For each account in the connected component (except the query),
+                        # reconstruct and display the chain path.
+                        for alt in sorted(chain_nodes):
+                            if alt == query:
+                                continue
+                            chain_str = reconstruct_chain_path(alt, parent, hide_ip=args.hide_ip)
+                            print(f"  {chain_str}")
 
 if __name__ == '__main__':
     main()
