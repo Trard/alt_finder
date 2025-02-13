@@ -1,32 +1,47 @@
 #!/usr/bin/env python3
 import argparse
+import datetime
 import gzip
 import os
 import re
 import glob
-from collections import defaultdict
+from collections import defaultdict, deque
 
-def parse_logs(directory, file_pattern):
+def parse_logs(directory, file_pattern, since=None):
     """
     Scan all files matching the file_pattern in the given directory (recursively)
-    and extract login events.
+    and extract login events. If 'since' is provided (a datetime object), only files
+    with a modification time on or after 'since' are processed.
     """
     player_to_ips = defaultdict(set)
     ip_to_players = defaultdict(set)
-    
+
     # Regex to match login events.
+    # Example line:
+    # 27340:[22:40:23] [Region Scheduler Thread #3/INFO]: kouchklinktrane[/5.144.73.108:54424] logged in with entity id 3189557 ...
     login_regex = re.compile(
         r':\s*(\S+)\[(?:/)?(\d+\.\d+\.\d+\.\d+):\d+\]\s+logged in with entity id'
     )
-    
+
     # Build a glob pattern that will match both gzipped and non-gzipped files.
     pattern = os.path.join(directory, '**', file_pattern)
     files = glob.glob(pattern, recursive=True)
     print(f"Found {len(files)} file(s) matching pattern: {pattern}")
-    
+
     file_count = 0
     match_count = 0
     for filename in files:
+        # If --since was provided, check file modification time.
+        if since is not None:
+            try:
+                file_mtime = os.path.getmtime(filename)
+                if file_mtime < since.timestamp():
+                    # Skip files older than the specified date.
+                    continue
+            except Exception as e:
+                print(f"Could not get modification time for {filename}: {e}")
+                continue
+
         file_count += 1
         try:
             # Open gzipped files with gzip.open, otherwise use normal open.
@@ -44,9 +59,51 @@ def parse_logs(directory, file_pattern):
                         ip_to_players[ip].add(player)
         except Exception as e:
             print(f"Error processing {filename}: {e}")
-    
+
     print(f"Processed {file_count} file(s), found {match_count} login entry(ies).")
     return player_to_ips, ip_to_players
+
+def get_alt_chain_paths(start, player_to_ips, ip_to_players):
+    """
+    Perform a breadth-first search starting from 'start' to find all players
+    connected by shared IPs. Returns a tuple (parent, visited) where:
+      - parent: a dict mapping each encountered player (except start) to a tuple (prev, ip)
+                indicating that 'prev' connects to that player via 'ip'.
+      - visited: the set of all players in the connected component.
+    """
+    queue = deque([start])
+    visited = {start}
+    parent = {}  # key: player, value: (previous player, connecting IP)
+    while queue:
+        current = queue.popleft()
+        for ip in player_to_ips.get(current, []):
+            for neighbor in ip_to_players.get(ip, []):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    parent[neighbor] = (current, ip)
+                    queue.append(neighbor)
+    return parent, visited
+
+def reconstruct_chain_path(alt, parent):
+    """
+    Reconstructs the chain path from the starting player to 'alt' using the 'parent' map.
+    Returns a string showing the chain in the form:
+      start -> intermediate (via connecting_ip) -> alt (via connecting_ip)
+    """
+    # If there is no parent, then alt is the starting node.
+    if alt not in parent:
+        return alt
+    path = []
+    current = alt
+    while current in parent:
+        prev, ip = parent[current]
+        path.append((prev, ip, current))
+        current = prev
+    path.reverse()
+    chain_str = path[0][0]  # starting player name
+    for prev, ip, curr in path:
+        chain_str += f" -> {curr} (via {ip})"
+    return chain_str
 
 def main():
     parser = argparse.ArgumentParser(
@@ -64,9 +121,26 @@ def main():
         "--pattern", default="*.log*",
         help="Glob pattern for log files (default: *.log*). This pattern matches both plain text logs (e.g. latest.log) and gzipped logs (e.g. *.log.gz)"
     )
+    parser.add_argument(
+        "--chain", action="store_true",
+        help="Recursively build and display alternate account chains (alt chains) connecting accounts."
+    )
+    parser.add_argument(
+        "--since",
+        help="Only process log files modified since this ISO date (e.g. 2025-02-14T00:00:00)"
+    )
     args = parser.parse_args()
 
-    player_to_ips, ip_to_players = parse_logs(args.dir, args.pattern)
+    # If --since is provided, parse the ISO date.
+    since_dt = None
+    if args.since:
+        try:
+            since_dt = datetime.datetime.fromisoformat(args.since)
+        except Exception as e:
+            print(f"Error parsing --since date: {e}")
+            return
+
+    player_to_ips, ip_to_players = parse_logs(args.dir, args.pattern, since=since_dt)
     query = args.query.strip()
 
     # Determine if query is an IP address.
@@ -97,6 +171,21 @@ def main():
                     print(f"  {alt}: {', '.join(alt_ips)}")
             else:
                 print("\nNo alternate accounts found sharing the same IP(s).")
+
+            # If the chain flag is enabled, build and display the alt chains.
+            if args.chain:
+                parent, chain_nodes = get_alt_chain_paths(query, player_to_ips, ip_to_players)
+                if len(chain_nodes) == 1:
+                    print("\nNo alternate account chain found.")
+                else:
+                    print("\nAlternate account chains:")
+                    # For each account in the connected component (except the query),
+                    # reconstruct and display the chain path.
+                    for alt in sorted(chain_nodes):
+                        if alt == query:
+                            continue
+                        chain_str = reconstruct_chain_path(alt, parent)
+                        print(f"  {chain_str}")
 
 if __name__ == '__main__':
     main()
